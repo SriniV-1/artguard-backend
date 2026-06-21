@@ -1,10 +1,12 @@
 package com.artguard.gateway.web;
 
 import com.artguard.gateway.alert.AlertSocketHandler;
+import com.artguard.gateway.alert.Envelope;
 import com.artguard.gateway.camera.CameraIngestService;
 import com.artguard.gateway.config.ArtGuardProperties;
 import com.artguard.gateway.incident.Incident;
 import com.artguard.gateway.incident.IncidentService;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -64,6 +66,23 @@ public class ApiController {
     @GetMapping("/incidents/open")
     public List<Incident> openIncidents() {
         return incidents.open();
+    }
+
+    /**
+     * Declare or clear a facility-wide alert (museum lockdown). Broadcasts to
+     * every connected dashboard over WebSocket so all operators see it at once.
+     */
+    @PostMapping("/facility-alert")
+    public Map<String, Object> facilityAlert(@RequestBody(required = false) Map<String, Object> body) {
+        boolean active = body == null || !Boolean.FALSE.equals(body.get("active"));
+        Object reason = body == null ? null : body.get("reason");
+        Object zone = body == null ? null : body.get("zone");
+        alerts.send(new Envelope("facility", Map.of(
+            "active", active,
+            "reason", reason == null ? "Manual escalation" : reason,
+            "zone", zone == null ? "" : zone,
+            "ts", Instant.now().toString())));
+        return Map.of("ok", true, "active", active);
     }
 
     @GetMapping("/stats")

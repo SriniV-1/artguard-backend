@@ -74,7 +74,7 @@ public class IncidentService {
                 lastBroadcast.put(incident.getId(), now);
                 long latency = Math.max(0, now - captureTsMs);
                 alerts.broadcast(new Alert(
-                        incident.getId(), cameraId, cameraName, label, confidence,
+                        incident.getId(), frameId, cameraId, cameraName, label, confidence,
                         status, incident.getDetectionCount(), latency,
                         bx, by, bw, bh, Instant.now()));
             }

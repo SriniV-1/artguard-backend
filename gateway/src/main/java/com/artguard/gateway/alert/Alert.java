@@ -14,6 +14,7 @@ import java.time.Instant;
  */
 public record Alert(
         long incidentId,
+        long personId,        // the tracked subject (dot) that triggered it
         String cameraId,
         String cameraName,
         String label,

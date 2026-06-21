@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 /* ArtGuard surveillance control — overhead simulation.
-   Each zone is a top-down view; people are green dots that turn red when they
-   trigger a suspicious-behavior alert. Scene state + alerts stream from the
-   gateway over /ws/alerts (envelopes tagged {type:"scene"|"alert"}). A
-   self-contained demo feed drives the UI if the backend isn't reachable. */
+   6 zone displays of people as green dots (red when flagged). Click an alert to
+   spotlight the subject and open its zone; click any zone to open it large;
+   declare a facility-wide alert from the alert bar. Scene/alerts/facility events
+   stream from the gateway over /ws/alerts as tagged envelopes. */
 
 const FALLBACK_ZONES = [
-  { id: "cam-01", name: "West Concourse" },
-  { id: "cam-02", name: "Main Gallery" },
-  { id: "cam-03", name: "North Entrance" },
-  { id: "cam-04", name: "Loading Dock" },
+  { id: "cam-01", name: "West Concourse" }, { id: "cam-02", name: "Main Gallery" },
+  { id: "cam-03", name: "North Entrance" }, { id: "cam-04", name: "Loading Dock" },
+  { id: "cam-05", name: "Central Atrium" }, { id: "cam-06", name: "Storage Wing" },
 ];
 
 const SEV = {
@@ -34,7 +33,9 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [demo, setDemo] = useState(false);
   const [paused, setPaused] = useState(false);
-  const [selected, setSelected] = useState(null);
+  const [selected, setSelected] = useState(null);   // selected alert {_k,...}
+  const [expanded, setExpanded] = useState(null);    // expanded zone id
+  const [facility, setFacility] = useState(null);    // facility-alert state {reason,zone,ts}
   const pausedRef = useRef(false);
   const connectedRef = useRef(false);
   const seq = useRef(1);
@@ -43,94 +44,93 @@ export default function App() {
 
   useEffect(() => {
     let ws, sim, retry, alive = true;
+    const onAlert = (a) => { if (!pausedRef.current) setAlerts((prev) => [{ ...a, _k: seq.current++ }, ...prev].slice(0, 50)); };
 
-    const onAlert = (a) => {
-      if (pausedRef.current) return;
-      setAlerts((prev) => [{ ...a, _k: seq.current++ }, ...prev].slice(0, 50));
-    };
-
-    // ── demo simulation (frontend) — ONLY when the backend is unreachable ──
     const startDemo = () => {
-      if (!alive || sim || connectedRef.current) return; // never run alongside the live WS
+      if (!alive || sim || connectedRef.current) return;
       setDemo(true);
-      const zones = FALLBACK_ZONES.map((z) => ({
-        ...z, people: Array.from({ length: 7 }, (_, i) => ({
-          id: i, x: Math.random(), y: Math.random(),
-          tx: Math.random(), ty: Math.random(), status: "normal", until: 0,
-        })),
-      }));
-      const behaviors = ["Loitering","Loitering","Suspicious Movement","Suspicious Movement","Erratic Movement","Intrusion","Abandoned Object"];
+      const zones = FALLBACK_ZONES.map((z) => ({ ...z, structures: [],
+        people: Array.from({ length: 6 }, (_, i) => ({ id: i, x: Math.random(), y: Math.random(), tx: Math.random(), ty: Math.random(), status: "normal", until: 0 })) }));
+      const bs = ["Loitering","Suspicious Movement","Erratic Movement","Intrusion"];
       sim = setInterval(() => {
         const now = Date.now();
         for (const z of zones) for (const p of z.people) {
           const dx = p.tx - p.x, dy = p.ty - p.y, d = Math.hypot(dx, dy);
-          if (d < 0.02) { p.tx = Math.random(); p.ty = Math.random(); }
-          else { p.x += dx / d * 0.008; p.y += dy / d * 0.008; }
+          if (d < 0.02) { p.tx = Math.random(); p.ty = Math.random(); } else { p.x += dx / d * 0.008; p.y += dy / d * 0.008; }
           if (p.status === "alert" && now > p.until) p.status = "normal";
-          if (p.status === "normal" && Math.random() < 0.01) {
-            p.status = "alert"; p.until = now + 6000;
-            const b = behaviors[Math.floor(Math.random() * behaviors.length)];
-            onAlert({ incidentId: 1000 + seq.current, cameraId: z.id, cameraName: z.name,
-              label: b, confidence: 0.6 + Math.random() * 0.39, status: "OPENED",
-              detectionCount: 1, latencyMs: 60 + Math.floor(Math.random() * 90),
-              timestamp: new Date().toISOString() });
-          }
+          if (p.status === "normal" && Math.random() < 0.004) { p.status = "alert"; p.until = now + 6000;
+            const b = bs[Math.floor(Math.random() * bs.length)];
+            onAlert({ incidentId: 1000 + seq.current, personId: p.id, cameraId: z.id, cameraName: z.name, label: b,
+              confidence: 0.6 + Math.random() * 0.39, status: "OPENED", detectionCount: 1,
+              latencyMs: 60 + Math.floor(Math.random() * 90), timestamp: new Date().toISOString() }); }
         }
-        setScene({ cameras: zones.map((z) => ({ id: z.id, name: z.name,
+        setScene({ cameras: zones.map((z) => ({ id: z.id, name: z.name, structures: z.structures,
           people: z.people.map((p) => ({ id: p.id, x: p.x, y: p.y, status: p.status })) })) });
       }, 100);
     };
 
     const connect = () => {
-      try {
-        const proto = location.protocol === "https:" ? "wss" : "ws";
-        ws = new WebSocket(`${proto}://${location.host}/ws/alerts`);
-      } catch { startDemo(); return; }
-      ws.onopen = () => {
-        if (!alive) return;
-        connectedRef.current = true; setConnected(true); setDemo(false);
-        clearInterval(sim); sim = null;          // stop any demo feed once live
-        clearTimeout(kick);
-      };
-      ws.onmessage = (e) => {
-        try {
-          const m = JSON.parse(e.data);
-          if (m.type === "scene") setScene(m.data);
-          else if (m.type === "alert") onAlert(m.data);
-        } catch {}
-      };
-      ws.onclose = () => {
-        if (!alive) return;
-        connectedRef.current = false; setConnected(false);
-        startDemo(); retry = setTimeout(connect, 4000);
-      };
+      try { ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/alerts`); }
+      catch { startDemo(); return; }
+      ws.onopen = () => { if (!alive) return; connectedRef.current = true; setConnected(true); setDemo(false); clearInterval(sim); sim = null; clearTimeout(kick); };
+      ws.onmessage = (e) => { try { const m = JSON.parse(e.data);
+        if (m.type === "scene") setScene(m.data);
+        else if (m.type === "alert") onAlert(m.data);
+        else if (m.type === "facility") setFacility(m.data.active ? m.data : null);
+      } catch {} };
+      ws.onclose = () => { if (!alive) return; connectedRef.current = false; setConnected(false); startDemo(); retry = setTimeout(connect, 4000); };
       ws.onerror = () => { try { ws.close(); } catch {} };
     };
-
     connect();
-    // only fall back to the demo if we haven't connected within 1.5s
     const kick = setTimeout(() => { if (!connectedRef.current) startDemo(); }, 1500);
     return () => { alive = false; clearTimeout(kick); clearTimeout(retry); clearInterval(sim); if (ws) { ws.onclose = null; ws.close(); } };
   }, []); // eslint-disable-line
 
+  const zones = scene.cameras?.length ? scene.cameras : FALLBACK_ZONES.map((z) => ({ ...z, people: [], structures: [] }));
   const stats = useMemo(() => {
     const lat = alerts.slice(0, 40).map((a) => a.latencyMs).filter((x) => x != null).sort((a, b) => a - b);
     const p95 = lat.length ? lat[Math.min(lat.length - 1, Math.floor(lat.length * 0.95))] : null;
     const open = new Set(alerts.filter((a) => a.status !== "RESOLVED").map((a) => a.incidentId)).size;
-    const tracked = (scene.cameras || []).reduce((s, c) => s + (c.people?.length || 0), 0);
+    const tracked = zones.reduce((s, c) => s + (c.people?.length || 0), 0);
     return { p95, open, total: alerts.length, tracked };
-  }, [alerts, scene]);
+  }, [alerts, zones]);
 
-  // which people are currently flagged (for the red dots), by camera
+  // clicking an alert: select it, spotlight its subject, open its zone
+  const openAlert = (a) => {
+    if (selected && selected._k === a._k) { setSelected(null); setExpanded(null); return; }
+    setSelected(a); setExpanded(a.cameraId);
+  };
+  const focus = selected ? { cameraId: selected.cameraId, personId: selected.personId } : null;
+
+  // facility-wide alert
+  const declareFacility = () => {
+    const z = selected?.cameraName || "";
+    const reason = selected ? `${selected.label} — operator escalation` : "Operator escalation";
+    fetch("/api/facility-alert", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: true, reason, zone: z }) }).catch(() => {});
+  };
+  const clearFacility = () => {
+    fetch("/api/facility-alert", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: false }) }).catch(() => setFacility(null));
+  };
+
+  const expandedZone = expanded ? zones.find((z) => z.id === expanded) : null;
+
   return (
     <div className="app">
+      {facility && (
+        <div className="facility-banner">
+          <span className="fb-pulse" />
+          <span className="fb-title">FACILITY-WIDE ALERT</span>
+          <span className="fb-reason">{facility.reason}{facility.zone ? ` · ${facility.zone}` : ""}</span>
+          <button className="fb-clear" onClick={clearFacility}>Stand down</button>
+        </div>
+      )}
+
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark" />
-          <div>
-            <div className="brand-name">ARTGUARD</div>
-            <div className="brand-sub">Surveillance Control</div>
-          </div>
+          <div><div className="brand-name">ARTGUARD</div><div className="brand-sub">Surveillance Control</div></div>
         </div>
         <div className="pipeline">
           {["Tracking", "Kafka", "Analysis", "Incident", "Alert"].map((s, i) => (
@@ -146,7 +146,7 @@ export default function App() {
       </header>
 
       <div className="statbar">
-        <Stat label="Zones" value={(scene.cameras || []).length || FALLBACK_ZONES.length} />
+        <Stat label="Zones" value={zones.length} />
         <Stat label="People tracked" value={stats.tracked} />
         <Stat label="Open incidents" value={stats.open} accent={stats.open ? "var(--amber)" : undefined} />
         <Stat label="p95 latency" value={stats.p95 != null ? `${stats.p95} ms` : "—"}
@@ -156,10 +156,14 @@ export default function App() {
 
       <main className="grid">
         <section className="cameras">
-          <div className="section-head">ZONE OVERVIEW <span className="legend"><i className="lg-dot normal" />tracked<i className="lg-dot alert" />flagged</span></div>
-          <div className="zone-grid">
-            {(scene.cameras?.length ? scene.cameras : FALLBACK_ZONES.map((z) => ({ ...z, people: [] }))).map((z) => (
-              <Zone key={z.id} zone={z} />
+          <div className="section-head">ZONE OVERVIEW <span className="legend"><i className="lg-dot normal" />tracked<i className="lg-dot flagged" />flagged</span></div>
+          <div className="zone-grid six">
+            {zones.map((z) => (
+              <div key={z.id} className={`zone ${(z.people || []).some((p) => p.status === "alert") ? "flagged" : ""}`}
+                   onClick={() => setExpanded(z.id)} title="Open zone">
+                <ZoneFloor zone={z} focus={focus} />
+                <div className="zone-meta"><span className="zone-name">{z.name}</span><span className="zone-count">{(z.people || []).length} tracked</span></div>
+              </div>
             ))}
           </div>
         </section>
@@ -168,20 +172,17 @@ export default function App() {
           <div className="section-head">
             LIVE ALERTS
             <div className="feed-controls">
-              <button className={`pause-btn ${paused ? "on" : ""}`} onClick={() => setPaused((p) => !p)}>
-                {paused ? "▶ Resume" : "⏸ Pause"}
-              </button>
+              <button className="facility-btn" onClick={declareFacility} title="Escalate to a facility-wide alert">⚠ Facility Alert</button>
+              <button className={`pause-btn ${paused ? "on" : ""}`} onClick={() => setPaused((p) => !p)}>{paused ? "▶" : "⏸"}</button>
               <span className="feed-count">{alerts.length}</span>
             </div>
           </div>
           <div className="alert-list">
             {alerts.length === 0 && <div className="empty">Monitoring — no incidents</div>}
             {alerts.map((a) => {
-              const sev = sevOf(a.label);
-              const isSel = selected && selected._k === a._k;
+              const sev = sevOf(a.label); const isSel = selected && selected._k === a._k;
               return (
-                <div key={a._k} className={`alert ${isSel ? "sel" : ""}`} style={{ "--sev": sev.color }}
-                     onClick={() => setSelected(isSel ? null : a)}>
+                <div key={a._k} className={`alert ${isSel ? "sel" : ""}`} style={{ "--sev": sev.color }} onClick={() => openAlert(a)}>
                   <div className="alert-sev" style={{ background: sev.color }}>{sev.tag}</div>
                   <div className="alert-main">
                     <div className="alert-line1">
@@ -195,10 +196,8 @@ export default function App() {
                     </div>
                     {isSel && (
                       <div className="alert-detail">
-                        <span>Incident #{a.incidentId}</span>
-                        <span>{a.status.toLowerCase()}</span>
-                        <span>{a.detectionCount} detections</span>
-                        <span>capture→alert {a.latencyMs}ms</span>
+                        <span>Subject #{a.personId}</span><span>Incident #{a.incidentId}</span>
+                        <span>{a.latencyMs}ms</span><span className="alert-open-hint">▣ zone opened</span>
                       </div>
                     )}
                   </div>
@@ -209,30 +208,49 @@ export default function App() {
           </div>
         </section>
       </main>
+
+      {expandedZone && (
+        <div className="zoom-backdrop" onClick={() => { setExpanded(null); }}>
+          <div className="zoom" onClick={(e) => e.stopPropagation()}>
+            <div className="zoom-head">
+              <span className="zoom-name">{expandedZone.name}</span>
+              {selected && selected.cameraId === expandedZone.id ? (
+                <span className="zoom-alert" style={{ "--sev": sevOf(selected.label).color }}>
+                  <span className="zoom-alert-dot" /> {selected.label} · subject #{selected.personId} · {(selected.confidence * 100).toFixed(0)}%
+                </span>
+              ) : (
+                <span className="zoom-sub">{(expandedZone.people || []).length} tracked · {(expandedZone.people || []).filter((p) => p.status === "alert").length} flagged</span>
+              )}
+              {selected && selected.cameraId === expandedZone.id && !facility && (
+                <button className="zoom-escalate" onClick={declareFacility}>⚠ Escalate to facility alert</button>
+              )}
+              {facility && <span className="zoom-escalated">● Facility alert active</span>}
+              <button className="zoom-close" onClick={() => setExpanded(null)}>✕</button>
+            </div>
+            <ZoneFloor zone={expandedZone} focus={focus} big />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function Zone({ zone }) {
-  const flagged = (zone.people || []).some((p) => p.status === "alert");
+function ZoneFloor({ zone, focus, big }) {
+  const focusId = focus && focus.cameraId === zone.id ? focus.personId : null;
   return (
-    <div className={`zone ${flagged ? "flagged" : ""}`}>
-      <div className="zone-floor">
-        <div className="zone-grid-lines" />
-        {(zone.structures || []).map((s, i) => (
-          <span key={i} className={`structure k-${s.kind}`}
-                style={{ left: `${s.x * 100}%`, top: `${s.y * 100}%`, width: `${s.w * 100}%`, height: `${s.h * 100}%` }} />
-        ))}
-        {(zone.people || []).map((p) => (
-          <span key={p.id} className={`person ${p.status === "alert" ? "alert" : ""}`}
-                style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }} />
-        ))}
-        <div className="zone-rec"><span className="rec-dot" />LIVE</div>
-      </div>
-      <div className="zone-meta">
-        <span className="zone-name">{zone.name}</span>
-        <span className="zone-count">{(zone.people || []).length} tracked</span>
-      </div>
+    <div className={`zone-floor ${big ? "big" : ""}`}>
+      <div className="zone-grid-lines" />
+      {(zone.structures || []).map((s, i) => (
+        <span key={i} className={`structure k-${s.kind}`}
+              style={{ left: `${s.x * 100}%`, top: `${s.y * 100}%`, width: `${s.w * 100}%`, height: `${s.h * 100}%` }} />
+      ))}
+      {(zone.people || []).map((p) => (
+        <span key={p.id} className={`person ${p.status === "alert" ? "alert" : ""} ${focusId === p.id ? "focus" : ""}`}
+              style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}>
+          {focusId === p.id && <span className="focus-ring" />}
+        </span>
+      ))}
+      <div className="zone-rec"><span className="rec-dot" />LIVE</div>
     </div>
   );
 }

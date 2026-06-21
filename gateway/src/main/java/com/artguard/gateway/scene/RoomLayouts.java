@@ -8,11 +8,13 @@ final class RoomLayouts {
 
     /** Pick a layout by zone index (cycles if there are more zones than layouts). */
     static List<Rect> forIndex(int i) {
-        return switch (i % 4) {
+        return switch (i % 6) {
             case 0 -> concourse();
             case 1 -> gallery();
             case 2 -> entrance();
-            default -> dock();
+            case 3 -> dock();
+            case 4 -> atrium();
+            default -> storage();
         };
     }
 
@@ -56,5 +58,25 @@ final class RoomLayouts {
             new Rect(0.70, 0.30, 0.14, 0.14, "crate"),
             new Rect(0.40, 0.58, 0.16, 0.14, "crate"),
             new Rect(0.66, 0.66, 0.12, 0.12, "crate"));
+    }
+
+    // Atrium: a central round sculpture + benches around it.
+    private static List<Rect> atrium() {
+        return List.of(
+            new Rect(0.42, 0.40, 0.16, 0.16, "pillar"),
+            new Rect(0.18, 0.20, 0.12, 0.04, "case"),
+            new Rect(0.70, 0.20, 0.12, 0.04, "case"),
+            new Rect(0.18, 0.74, 0.12, 0.04, "case"),
+            new Rect(0.70, 0.74, 0.12, 0.04, "case"));
+    }
+
+    // Storage: aisles of shelving (long racks with gaps to walk between).
+    private static List<Rect> storage() {
+        return List.of(
+            new Rect(0.14, 0.12, 0.06, 0.34, "wall"),
+            new Rect(0.14, 0.54, 0.06, 0.34, "wall"),
+            new Rect(0.47, 0.12, 0.06, 0.34, "wall"),
+            new Rect(0.47, 0.54, 0.06, 0.34, "wall"),
+            new Rect(0.80, 0.12, 0.06, 0.76, "wall"));
     }
 }

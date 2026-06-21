@@ -89,3 +89,9 @@ artguard:
       - id: cam-04
         name: Loading Dock
         type: simulated
+      - id: cam-05
+        name: Central Atrium
+        type: simulated
+      - id: cam-06
+        name: Storage Wing
+        type: simulated
