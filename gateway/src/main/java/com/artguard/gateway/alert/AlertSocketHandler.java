@@ -58,8 +58,12 @@ public class AlertSocketHandler extends TextWebSocketHandler {
             if (!s.isOpen()) { sessions.remove(s); continue; }
             try {
                 synchronized (s) { s.sendMessage(msg); }
-            } catch (IOException e) {
+            } catch (Exception e) {
+                // IOException OR IllegalStateException (e.g. a slow client whose
+                // buffer is mid-write at 10 msg/s). Drop the bad session; a
+                // failed send must never propagate and kill the broadcaster.
                 sessions.remove(s);
+                try { s.close(); } catch (Exception ignored) {}
             }
         }
     }

@@ -83,18 +83,23 @@ public class SceneSimulator {
     private void run() {
         while (running) {
             long t0 = System.currentTimeMillis();
-            for (Zone z : zones) {
-                long flagged = z.people().stream().filter(Person::isAlert).count();
-                for (Person p : z.people()) {
-                    p.step(z.obstacles());
-                    if (!p.isAlert() && flagged < MAX_FLAGGED_PER_ZONE
-                            && ThreadLocalRandom.current().nextDouble() < SUSPICION_RATE) {
-                        trigger(z, p);
-                        flagged++;
+            try {
+                for (Zone z : zones) {
+                    long flagged = z.people().stream().filter(Person::isAlert).count();
+                    for (Person p : z.people()) {
+                        p.step(z.obstacles());
+                        if (!p.isAlert() && flagged < MAX_FLAGGED_PER_ZONE
+                                && ThreadLocalRandom.current().nextDouble() < SUSPICION_RATE) {
+                            trigger(z, p);
+                            flagged++;
+                        }
                     }
                 }
+                broadcastScene();
+            } catch (Exception e) {
+                // never let a tick error kill the simulation loop
+                log.warn("scene tick error (continuing): {}", e.toString());
             }
-            broadcastScene();
             long sleep = TICK_MS - (System.currentTimeMillis() - t0);
             if (sleep > 0) try { Thread.sleep(sleep); } catch (InterruptedException e) { break; }
         }
