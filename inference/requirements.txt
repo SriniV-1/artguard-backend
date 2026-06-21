@@ -1,0 +1,6 @@
+# ArtGuard inference service — YOLOv8 over gRPC.
+ultralytics>=8.2.0      # YOLOv8 (auto-downloads yolov8n.pt on first run)
+grpcio>=1.66.0
+grpcio-tools>=1.66.0    # protoc + python/grpc plugins for stub generation
+opencv-python-headless>=4.9.0
+numpy>=1.26.0
