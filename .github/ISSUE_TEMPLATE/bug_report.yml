@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a problem with ArtGuard
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to file a bug report!
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps (and a minimal example if possible) to reproduce.
+      placeholder: |
+        1. Start infra with `docker compose up -d`
+        2. Run `./gradlew :gateway:bootRun`
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - simulation
+        - camera
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: JDK version, OS, Docker version, browser (for the dashboard).
+    validations:
+      required: true
